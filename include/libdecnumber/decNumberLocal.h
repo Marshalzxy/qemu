@@ -37,13 +37,12 @@
 /* decNumber.h or one of decDouble (etc.) must be included first.     */
 /* ------------------------------------------------------------------ */
 
-#if !defined(DECNUMBERLOC)
-  #define DECNUMBERLOC
+#ifndef DECNUMBERLOCAL_H
+#define DECNUMBERLOCAL_H
+
   #define DECVERSION	"decNumber 3.53" /* Package Version [16 max.] */
   #define DECNLAUTHOR	"Mike Cowlishaw"	      /* Who to blame */
 
-  #include <stdlib.h>	      /* for abs			      */
-  #include <string.h>	      /* for memset, strcpy		      */
   #include "libdecnumber/dconfig.h"
 
   /* Conditional code flag -- set this to match hardware platform     */
@@ -153,7 +152,7 @@
 
 
   /* ---------------------------------------------------------------- */
-  /* Definitions for arbitary-precision modules (only valid after     */
+  /* Definitions for arbitrary-precision modules (only valid after    */
   /* decNumber.h has been included)				      */
   /* ---------------------------------------------------------------- */
 
@@ -660,6 +659,4 @@
   /* [end of format-dependent macros and constants]		      */
   #endif
 
-#else
-  #error decNumberLocal included more than once
 #endif

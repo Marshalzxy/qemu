@@ -22,13 +22,13 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include <hw/hw.h>
-#include <hw/i386/pc.h>
-#include <hw/pcmcia.h>
-#include "block/block.h"
+#include "qemu/osdep.h"
+#include "hw/hw.h"
+#include "hw/pcmcia.h"
+#include "sysemu/block-backend.h"
 #include "sysemu/dma.h"
 
-#include <hw/ide/internal.h>
+#include "hw/ide/internal.h"
 
 #define TYPE_MICRODRIVE "microdrive"
 #define MICRODRIVE(obj) OBJECT_CHECK(MicroDriveState, (obj), TYPE_MICRODRIVE)
@@ -155,7 +155,7 @@ static uint8_t md_attr_read(PCMCIACardState *card, uint32_t at)
         return 0x00;
 #ifdef VERBOSE
     default:
-        printf("%s: Bad attribute space register %02x\n", __FUNCTION__, at);
+        printf("%s: Bad attribute space register %02x\n", __func__, at);
 #endif
     }
 
@@ -192,7 +192,7 @@ static void md_attr_write(PCMCIACardState *card, uint32_t at, uint8_t value)
     case 0x06:	/* Socket and Copy Register */
         break;
     default:
-        printf("%s: Bad attribute space register %02x\n", __FUNCTION__, at);
+        printf("%s: Bad attribute space register %02x\n", __func__, at);
     }
 }
 
@@ -247,7 +247,7 @@ static uint16_t md_common_read(PCMCIACardState *card, uint32_t at)
         return ide_ioport_read(&s->bus, 0x1);
     case 0xe:	/* Alternate Status */
         ifs = idebus_active_if(&s->bus);
-        if (ifs->bs) {
+        if (ifs->blk) {
             return ifs->status;
         } else {
             return 0;
@@ -543,7 +543,6 @@ static int dscm1xxxx_attach(PCMCIACardState *card)
     device_reset(DEVICE(md));
     md_interrupt_update(md);
 
-    card->slot->card_string = "DSCM-1xxxx Hitachi Microdrive";
     return 0;
 }
 
@@ -567,7 +566,7 @@ PCMCIACardState *dscm1xxxx_init(DriveInfo *dinfo)
     }
     md->bus.ifs[0].drive_kind = IDE_CFATA;
     md->bus.ifs[0].mdata_size = METADATA_SIZE;
-    md->bus.ifs[0].mdata_storage = (uint8_t *) g_malloc0(METADATA_SIZE);
+    md->bus.ifs[0].mdata_storage = g_malloc0(METADATA_SIZE);
 
     return PCMCIA_CARD(md);
 }
@@ -575,12 +574,15 @@ PCMCIACardState *dscm1xxxx_init(DriveInfo *dinfo)
 static void dscm1xxxx_class_init(ObjectClass *oc, void *data)
 {
     PCMCIACardClass *pcc = PCMCIA_CARD_CLASS(oc);
+    DeviceClass *dc = DEVICE_CLASS(oc);
 
     pcc->cis = dscm1xxxx_cis;
     pcc->cis_len = sizeof(dscm1xxxx_cis);
 
     pcc->attach = dscm1xxxx_attach;
     pcc->detach = dscm1xxxx_detach;
+    /* Reason: Needs to be wired-up in code, see dscm1xxxx_init() */
+    dc->user_creatable = false;
 }
 
 static const TypeInfo dscm1xxxx_type_info = {
@@ -593,7 +595,7 @@ static void microdrive_realize(DeviceState *dev, Error **errp)
 {
     MicroDriveState *md = MICRODRIVE(dev);
 
-    ide_init2(&md->bus, qemu_allocate_irqs(md_set_irq, md, 1)[0]);
+    ide_init2(&md->bus, qemu_allocate_irq(md_set_irq, md, 0));
 }
 
 static void microdrive_init(Object *obj)

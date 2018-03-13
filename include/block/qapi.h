@@ -25,21 +25,17 @@
 #ifndef BLOCK_QAPI_H
 #define BLOCK_QAPI_H
 
-#include "qapi-types.h"
 #include "block/block.h"
 #include "block/snapshot.h"
 
-BlockDeviceInfo *bdrv_block_device_info(BlockDriverState *bs);
+BlockDeviceInfo *bdrv_block_device_info(BlockBackend *blk,
+                                        BlockDriverState *bs, Error **errp);
 int bdrv_query_snapshot_info_list(BlockDriverState *bs,
                                   SnapshotInfoList **p_list,
                                   Error **errp);
 void bdrv_query_image_info(BlockDriverState *bs,
                            ImageInfo **p_info,
                            Error **errp);
-void bdrv_query_info(BlockDriverState *bs,
-                     BlockInfo **p_info,
-                     Error **errp);
-BlockStats *bdrv_query_stats(const BlockDriverState *bs);
 
 void bdrv_snapshot_dump(fprintf_function func_fprintf, void *f,
                         QEMUSnapshotInfo *sn);

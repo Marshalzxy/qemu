@@ -26,7 +26,7 @@ run_qemu() {
     local kernel=$1
     shift
 
-    echo -e "\n\n=== Running test case: $kernel $@ ===\n" >> test.log
+    printf %b "\n\n=== Running test case: $kernel $* ===\n\n" >> test.log
 
     $QEMU \
         -kernel $kernel \
@@ -48,10 +48,17 @@ mmap() {
     run_qemu mmap.elf -m 8G
 }
 
+modules() {
+    run_qemu modules.elf
+    run_qemu modules.elf -initrd module.txt
+    run_qemu modules.elf -initrd "module.txt argument"
+    run_qemu modules.elf -initrd "module.txt argument,,with,,commas"
+    run_qemu modules.elf -initrd "module.txt,module.txt argument,module.txt"
+}
 
 make all
 
-for t in mmap; do
+for t in mmap modules; do
 
     echo > test.log
     $t
@@ -61,21 +68,21 @@ for t in mmap; do
     pass=1
 
     if [ $debugexit != 1 ]; then
-        echo -e "\e[31m ?? \e[0m $t (no debugexit used, exit code $ret)"
+        printf %b "\e[31m ?? \e[0m $t (no debugexit used, exit code $ret)\n"
         pass=0
     elif [ $ret != 0 ]; then
-        echo -e "\e[31mFAIL\e[0m $t (exit code $ret)"
+        printf %b "\e[31mFAIL\e[0m $t (exit code $ret)\n"
         pass=0
     fi
 
     if ! diff $t.out test.log > /dev/null 2>&1; then
-        echo -e "\e[31mFAIL\e[0m $t (output difference)"
+        printf %b "\e[31mFAIL\e[0m $t (output difference)\n"
         diff -u $t.out test.log
         pass=0
     fi
 
     if [ $pass == 1 ]; then
-        echo -e "\e[32mPASS\e[0m $t"
+        printf %b "\e[32mPASS\e[0m $t\n"
     fi
 
 done

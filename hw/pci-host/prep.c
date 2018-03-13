@@ -23,6 +23,8 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "hw/hw.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/pci_bus.h"
@@ -140,7 +142,8 @@ static uint64_t raven_io_read(void *opaque, hwaddr addr,
     uint8_t buf[4];
 
     addr = raven_io_address(s, addr);
-    address_space_read(&s->pci_io_as, addr + 0x80000000, buf, size);
+    address_space_read(&s->pci_io_as, addr + 0x80000000,
+                       MEMTXATTRS_UNSPECIFIED, buf, size);
 
     if (size == 1) {
         return buf[0];
@@ -171,7 +174,8 @@ static void raven_io_write(void *opaque, hwaddr addr,
         g_assert_not_reached();
     }
 
-    address_space_write(&s->pci_io_as, addr + 0x80000000, buf, size);
+    address_space_write(&s->pci_io_as, addr + 0x80000000,
+                        MEMTXATTRS_UNSPECIFIED, buf, size);
 }
 
 static const MemoryRegionOps raven_io_ops = {
@@ -243,6 +247,7 @@ static void raven_pcihost_realizefn(DeviceState *d, Error **errp)
     memory_region_add_subregion(address_space_mem, 0xbffffff0, &s->pci_intack);
 
     /* TODO Remove once realize propagates to child devices. */
+    object_property_set_bool(OBJECT(&s->pci_bus), true, "realized", errp);
     object_property_set_bool(OBJECT(&s->pci_dev), true, "realized", errp);
 }
 
@@ -256,9 +261,7 @@ static void raven_pcihost_initfn(Object *obj)
     memory_region_init(&s->pci_io, obj, "pci-io", 0x3f800000);
     memory_region_init_io(&s->pci_io_non_contiguous, obj, &raven_io_ops, s,
                           "pci-io-non-contiguous", 0x00800000);
-    /* Open Hack'Ware hack: real size should be only 0x3f000000 bytes */
-    memory_region_init(&s->pci_memory, obj, "pci-memory",
-                       0x3f000000 + 0xc0000000ULL);
+    memory_region_init(&s->pci_memory, obj, "pci-memory", 0x3f000000);
     address_space_init(&s->pci_io_as, &s->pci_io, "raven-io");
 
     /* CPU address space */
@@ -266,8 +269,8 @@ static void raven_pcihost_initfn(Object *obj)
     memory_region_add_subregion_overlap(address_space_mem, 0x80000000,
                                         &s->pci_io_non_contiguous, 1);
     memory_region_add_subregion(address_space_mem, 0xc0000000, &s->pci_memory);
-    pci_bus_new_inplace(&s->pci_bus, sizeof(s->pci_bus), DEVICE(obj), NULL,
-                        &s->pci_memory, &s->pci_io, 0, TYPE_PCI_BUS);
+    pci_root_bus_new_inplace(&s->pci_bus, sizeof(s->pci_bus), DEVICE(obj), NULL,
+                             &s->pci_memory, &s->pci_io, 0, TYPE_PCI_BUS);
 
     /* Bus master address space */
     memory_region_init(&s->bm, obj, "bm-raven", UINT32_MAX);
@@ -291,7 +294,7 @@ static void raven_pcihost_initfn(Object *obj)
     qdev_prop_set_bit(pci_dev, "multifunction", false);
 }
 
-static int raven_init(PCIDevice *d)
+static void raven_realize(PCIDevice *d, Error **errp)
 {
     RavenPCIState *s = RAVEN_PCI_DEVICE(d);
     char *filename;
@@ -301,17 +304,17 @@ static int raven_init(PCIDevice *d)
     d->config[0x0D] = 0x10; // latency_timer
     d->config[0x34] = 0x00; // capabilities_pointer
 
-    memory_region_init_ram(&s->bios, OBJECT(s), "bios", BIOS_SIZE);
+    memory_region_init_ram_nomigrate(&s->bios, OBJECT(s), "bios", BIOS_SIZE,
+                           &error_fatal);
     memory_region_set_readonly(&s->bios, true);
     memory_region_add_subregion(get_system_memory(), (uint32_t)(-BIOS_SIZE),
                                 &s->bios);
-    vmstate_register_ram_global(&s->bios);
     if (s->bios_name) {
         filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, s->bios_name);
         if (filename) {
             if (s->elf_machine != EM_NONE) {
                 bios_size = load_elf(filename, NULL, NULL, NULL,
-                                     NULL, NULL, 1, s->elf_machine, 0);
+                                     NULL, NULL, 1, s->elf_machine, 0, 0);
             }
             if (bios_size < 0) {
                 bios_size = get_image_size(filename);
@@ -324,15 +327,15 @@ static int raven_init(PCIDevice *d)
                 }
             }
         }
+        g_free(filename);
         if (bios_size < 0 || bios_size > BIOS_SIZE) {
-            hw_error("qemu: could not load bios image '%s'\n", s->bios_name);
-        }
-        if (filename) {
-            g_free(filename);
+            memory_region_del_subregion(get_system_memory(), &s->bios);
+            error_setg(errp, "Could not load bios image '%s'", s->bios_name);
+            return;
         }
     }
 
-    return 0;
+    vmstate_register_ram_global(&s->bios);
 }
 
 static const VMStateDescription vmstate_raven = {
@@ -350,7 +353,7 @@ static void raven_class_init(ObjectClass *klass, void *data)
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
     DeviceClass *dc = DEVICE_CLASS(klass);
 
-    k->init = raven_init;
+    k->realize = raven_realize;
     k->vendor_id = PCI_VENDOR_ID_MOTOROLA;
     k->device_id = PCI_DEVICE_ID_MOTOROLA_RAVEN;
     k->revision = 0x00;
@@ -358,10 +361,10 @@ static void raven_class_init(ObjectClass *klass, void *data)
     dc->desc = "PReP Host Bridge - Motorola Raven";
     dc->vmsd = &vmstate_raven;
     /*
-     * PCI-facing part of the host bridge, not usable without the
-     * host-facing part, which can't be device_add'ed, yet.
+     * Reason: PCI-facing part of the host bridge, not usable without
+     * the host-facing part, which can't be device_add'ed, yet.
      */
-    dc->cannot_instantiate_with_device_add_yet = true;
+    dc->user_creatable = false;
 }
 
 static const TypeInfo raven_info = {
@@ -369,6 +372,10 @@ static const TypeInfo raven_info = {
     .parent = TYPE_PCI_DEVICE,
     .instance_size = sizeof(RavenPCIState),
     .class_init = raven_class_init,
+    .interfaces = (InterfaceInfo[]) {
+        { INTERFACE_CONVENTIONAL_PCI_DEVICE },
+        { },
+    },
 };
 
 static Property raven_pcihost_properties[] = {

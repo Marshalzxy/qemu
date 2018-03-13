@@ -2,6 +2,7 @@
 #define QEMU_HW_ESP_H
 
 #include "hw/scsi/scsi.h"
+#include "hw/sysbus.h"
 
 /* esp.c */
 #define ESP_MAX_DEVS 7
@@ -14,6 +15,7 @@ void esp_init(hwaddr espaddr, int it_shift,
 
 #define ESP_REGS 16
 #define TI_BUFSZ 16
+#define ESP_CMDBUF_SZ 32
 
 typedef struct ESPState ESPState;
 
@@ -22,6 +24,7 @@ struct ESPState {
     uint8_t wregs[ESP_REGS];
     qemu_irq irq;
     uint8_t chip_id;
+    bool tchi_written;
     int32_t ti_size;
     uint32_t ti_rptr, ti_wptr;
     uint32_t status;
@@ -30,7 +33,7 @@ struct ESPState {
     SCSIBus bus;
     SCSIDevice *current_dev;
     SCSIRequest *current_req;
-    uint8_t cmdbuf[TI_BUFSZ];
+    uint8_t cmdbuf[ESP_CMDBUF_SZ];
     uint32_t cmdlen;
     uint32_t do_cmd;
 
@@ -49,6 +52,19 @@ struct ESPState {
     void *dma_opaque;
     void (*dma_cb)(ESPState *s);
 };
+
+#define TYPE_ESP "esp"
+#define ESP_STATE(obj) OBJECT_CHECK(SysBusESPState, (obj), TYPE_ESP)
+
+typedef struct {
+    /*< private >*/
+    SysBusDevice parent_obj;
+    /*< public >*/
+
+    MemoryRegion iomem;
+    uint32_t it_shift;
+    ESPState esp;
+} SysBusESPState;
 
 #define ESP_TCLO   0x0
 #define ESP_TCMID  0x1

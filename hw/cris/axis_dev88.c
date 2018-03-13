@@ -22,6 +22,10 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
+#include "qapi/error.h"
+#include "qemu-common.h"
+#include "cpu.h"
 #include "hw/sysbus.h"
 #include "net/net.h"
 #include "hw/block/flash.h"
@@ -30,9 +34,10 @@
 #include "hw/loader.h"
 #include "elf.h"
 #include "boot.h"
-#include "sysemu/blockdev.h"
+#include "sysemu/block-backend.h"
 #include "exec/address-spaces.h"
 #include "sysemu/qtest.h"
+#include "sysemu/sysemu.h"
 
 #define D(x)
 #define DNAND(x)
@@ -138,7 +143,7 @@ static void tempsensor_clkedge(struct tempsensor_t *s,
                     s->count = 16;
 
                     if ((s->regs[0] & 0xff) == 0) {
-                        /* 25 degrees celcius.  */
+                        /* 25 degrees celsius.  */
                         s->shiftreg = 0x0b9f;
                     } else if ((s->regs[0] & 0xff) == 0xff) {
                         /* Sensor ID, 0x8100 LM70.  */
@@ -246,7 +251,6 @@ static
 void axisdev88_init(MachineState *machine)
 {
     ram_addr_t ram_size = machine->ram_size;
-    const char *cpu_model = machine->cpu_model;
     const char *kernel_filename = machine->kernel_filename;
     const char *kernel_cmdline = machine->kernel_cmdline;
     CRISCPU *cpu;
@@ -263,26 +267,23 @@ void axisdev88_init(MachineState *machine)
     MemoryRegion *phys_intmem = g_new(MemoryRegion, 1);
 
     /* init CPUs */
-    if (cpu_model == NULL) {
-        cpu_model = "crisv32";
-    }
-    cpu = cpu_cris_init(cpu_model);
+    cpu = CRIS_CPU(cpu_create(machine->cpu_type));
     env = &cpu->env;
 
     /* allocate RAM */
-    memory_region_init_ram(phys_ram, NULL, "axisdev88.ram", ram_size);
-    vmstate_register_ram_global(phys_ram);
+    memory_region_allocate_system_memory(phys_ram, NULL, "axisdev88.ram",
+                                         ram_size);
     memory_region_add_subregion(address_space_mem, 0x40000000, phys_ram);
 
     /* The ETRAX-FS has 128Kb on chip ram, the docs refer to it as the 
        internal memory.  */
-    memory_region_init_ram(phys_intmem, NULL, "axisdev88.chipram", INTMEM_SIZE);
-    vmstate_register_ram_global(phys_intmem);
+    memory_region_init_ram(phys_intmem, NULL, "axisdev88.chipram",
+                           INTMEM_SIZE, &error_fatal);
     memory_region_add_subregion(address_space_mem, 0x38000000, phys_intmem);
 
       /* Attach a NAND flash to CS1.  */
     nand = drive_get(IF_MTD, 0, 0);
-    nand_state.nand = nand_init(nand ? nand->bdrv : NULL,
+    nand_state.nand = nand_init(nand ? blk_by_legacy_dinfo(nand) : NULL,
                                 NAND_MFR_STMICRO, 0x39);
     memory_region_init_io(&nand_state.iomem, NULL, &nand_ops, &nand_state,
                           "nand", 0x05000000);
@@ -336,8 +337,7 @@ void axisdev88_init(MachineState *machine)
     sysbus_create_varargs("etraxfs,timer", 0x3005e000, irq[0x1b], nmi[1], NULL);
 
     for (i = 0; i < 4; i++) {
-        sysbus_create_simple("etraxfs,serial", 0x30026000 + i * 0x2000,
-                             irq[0x14 + i]);
+        etraxfs_ser_create(0x30026000 + i * 0x2000, irq[0x14 + i], serial_hds[i]);
     }
 
     if (kernel_filename) {
@@ -350,16 +350,12 @@ void axisdev88_init(MachineState *machine)
     }
 }
 
-static QEMUMachine axisdev88_machine = {
-    .name = "axis-dev88",
-    .desc = "AXIS devboard 88",
-    .init = axisdev88_init,
-    .is_default = 1,
-};
-
-static void axisdev88_machine_init(void)
+static void axisdev88_machine_init(MachineClass *mc)
 {
-    qemu_register_machine(&axisdev88_machine);
+    mc->desc = "AXIS devboard 88";
+    mc->init = axisdev88_init;
+    mc->is_default = 1;
+    mc->default_cpu_type = CRIS_CPU_TYPE_NAME("crisv32");
 }
 
-machine_init(axisdev88_machine_init);
+DEFINE_MACHINE("axis-dev88", axisdev88_machine_init)
